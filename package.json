@@ -1,0 +1,14 @@
+{
+  "name": "date-journal",
+  "version": "1.0.0",
+  "description": "A book-style photo journal for tracking dates, with page-turn swiping.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
