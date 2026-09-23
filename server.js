@@ -4,7 +4,10 @@
 // services have no persistent disk — see render.com/docs/free — so we can't
 // just write a JSON file to local disk and expect it to survive a restart).
 // Instead we proxy two endpoints to a free Supabase Postgres table:
-//   POST /api/share      body: the book object   -> { id }
+//   POST /api/share      body: { shareId?, book }   -> { id, updated }
+//                         (shareId omitted/unknown -> new link;
+//                          shareId from a previous share -> that link is
+//                          refreshed in place with the latest book data)
 //   GET  /api/share/:id                            -> the book object
 //
 // Configure these on Render (Environment tab), or in a local .env-style
@@ -89,6 +92,24 @@ async function supabaseInsert(id, data) {
   return r; // caller checks r.status (201 = created, 409 = id collision)
 }
 
+async function supabaseUpsert(id, data) {
+  // Used when the client already has a share id from a previous share of
+  // this same book — refreshes that row in place instead of creating a new
+  // link, so a previously-sent link can be updated with the latest pages.
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/shares?on_conflict=id`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    },
+    body: JSON.stringify({ id, data }),
+    signal: AbortSignal.timeout(SUPABASE_TIMEOUT_MS),
+  });
+  return r;
+}
+
 async function supabaseGet(id) {
   const r = await fetch(
     `${SUPABASE_URL}/rest/v1/shares?id=eq.${encodeURIComponent(id)}&select=data`,
@@ -104,20 +125,31 @@ async function supabaseGet(id) {
 
 async function handleCreateShare(req, res) {
   if (!SHARING_ON) return sendJson(res, 503, { error: 'Sharing is not configured on this server yet.' });
-  let book;
+  let payload;
   try {
-    book = await readJsonBody(req);
+    payload = await readJsonBody(req);
   } catch (e) {
     return sendJson(res, e.statusCode || 400, { error: e.message });
   }
-  if (!book || typeof book !== 'object' || !Array.isArray(book.pages)) {
+  if (!payload || typeof payload !== 'object' || !payload.book || !Array.isArray(payload.book.pages)) {
     return sendJson(res, 400, { error: "That doesn't look like a book." });
   }
+  const book = payload.book;
+  const existingId =
+    typeof payload.shareId === 'string' && /^[A-Za-z0-9_-]{4,40}$/.test(payload.shareId)
+      ? payload.shareId
+      : null;
   try {
+    if (existingId) {
+      const r = await supabaseUpsert(existingId, book);
+      if (r.ok) return sendJson(res, 200, { id: existingId, updated: true });
+      const text = await r.text().catch(() => '');
+      throw new Error(`Supabase upsert failed: ${r.status} ${text}`);
+    }
     for (let attempt = 0; attempt < 4; attempt++) {
       const id = newShareId();
       const r = await supabaseInsert(id, book);
-      if (r.status === 201 || r.status === 200) return sendJson(res, 200, { id });
+      if (r.status === 201 || r.status === 200) return sendJson(res, 200, { id, updated: false });
       if (r.status !== 409) {
         const text = await r.text().catch(() => '');
         throw new Error(`Supabase insert failed: ${r.status} ${text}`);

@@ -410,34 +410,42 @@ function editDetails(pi){
 /* ============ share ============ */
 const MAX_SHARE_BYTES=19*1024*1024;
 async function shareBook(book){
+  const has=!!book.shareId;
   const s=sheet(`
-    <div class="sheet-head"><h2>Share this book</h2><button class="iconbtn" data-a="close" aria-label="Close">${ICON.x}</button></div>
-    <p class="hint" style="margin-top:0">Anyone with the link can view "${h(book.title)}", page by page, just like you do here. They can't edit it, and it won't update after you keep adding — it's a snapshot as of right now.</p>
-    <div class="sheet-foot"><span class="sp"></span><button class="btn primary" data-a="go">Create link</button></div>`);
+    <div class="sheet-head"><h2>${has?'Update shared link':'Share this book'}</h2><button class="iconbtn" data-a="close" aria-label="Close">${ICON.x}</button></div>
+    <p class="hint" style="margin-top:0">${has
+      ?`This book already has a link. Updating it pushes your current pages, dates, and notes to that same link — anyone who already has it will now see the latest version.`
+      :`Anyone with the link can view "${h(book.title)}", page by page, just like you do here. They can't edit it. It won't update on its own — come back here and share again anytime you want the link to show your latest pages.`}</p>
+    <div class="sheet-foot">${has?'<button class="link" data-a="show" style="margin-right:auto">Show existing link</button>':'<span class="sp"></span>'}<button class="btn primary" data-a="go">${has?'Update link':'Create link'}</button></div>`);
+  const showLink=(url)=>{
+    s.el.innerHTML=`
+      <div class="sheet-head"><h2>Link ready</h2><button class="iconbtn" data-a="close" aria-label="Close">${ICON.x}</button></div>
+      <div class="field"><label for="share-url">Anyone with this link can view it</label>
+        <input id="share-url" type="text" readonly value="${h(url)}"></div>
+      <div class="sheet-foot"><span class="sp"></span><button class="btn primary" data-a="copy">${ICON.copy}Copy link</button></div>`;
+    const input=$('#share-url',s.el);input.addEventListener('click',()=>input.select());
+  };
   s.el.addEventListener('click',async e=>{
     const t=e.target.closest('button');if(!t)return;
     const a=t.dataset.a;
     if(a==='close'){s.close();return}
+    if(a==='show'){showLink(`${location.origin}/view/${book.shareId}`);return}
     if(a==='go'){
-      t.disabled=true;const label=t.textContent;t.textContent='Creating link…';
-      const payload={title:book.title,color:book.color,cover:book.cover,auto:book.auto,ratio:book.ratio,fit:book.fit,
+      t.disabled=true;const label=t.textContent;t.textContent=has?'Updating link…':'Creating link…';
+      const bookData={title:book.title,color:book.color,cover:book.cover,auto:book.auto,ratio:book.ratio,fit:book.fit,
         pages:book.pages.map(p=>({src:p.src,ratio:p.ratio,date:p.date,note:p.note}))};
-      const bytes=new Blob([JSON.stringify(payload)]).size;
+      const bytes=new Blob([JSON.stringify(bookData)]).size;
       if(bytes>MAX_SHARE_BYTES){
         toast("This book's images are too large to share in one link. Try a book with fewer pages, or smaller Canva exports.");
         t.disabled=false;t.textContent=label;return;
       }
       try{
-        const r=await fetch('/api/share',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        const r=await fetch('/api/share',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({shareId:book.shareId||undefined,book:bookData})});
         const data=await r.json().catch(()=>({}));
         if(!r.ok)throw new Error(data.error||"Couldn't create the link. Try again in a moment.");
-        const url=`${location.origin}/view/${data.id}`;
-        s.el.innerHTML=`
-          <div class="sheet-head"><h2>Link ready</h2><button class="iconbtn" data-a="close" aria-label="Close">${ICON.x}</button></div>
-          <div class="field"><label for="share-url">Anyone with this link can view it</label>
-            <input id="share-url" type="text" readonly value="${h(url)}"></div>
-          <div class="sheet-foot"><span class="sp"></span><button class="btn primary" data-a="copy">${ICON.copy}Copy link</button></div>`;
-        const input=$('#share-url',s.el);input.addEventListener('click',()=>input.select());
+        book.shareId=data.id;persist(book);
+        showLink(`${location.origin}/view/${data.id}`);
       }catch(err){
         toast(err.message||"Couldn't create the link. Try again in a moment.");
         t.disabled=false;t.textContent=label;
@@ -518,6 +526,3 @@ async function loadSharedBook(id){
   renderShelf();
   if(!DB.ok)toast("Saving isn't available here, so books will disappear when you close this page.");
 })();
-
-
-
