@@ -12,7 +12,9 @@ const ICON={
  x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
  left:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
  right:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
- trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>'
+ trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+ share:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-3.9M8.6 13.4l6.8 3.9"/></svg>',
+ copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 01-1-1V4a1 1 0 011-1h10a1 1 0 011 1v1"/></svg>'
 };
 const COLORS=[['Slate','#5B6F8C'],['Sage','#7E9A87'],['Rose','#C58B93'],['Honey','#D2A74A'],['Plum','#6E4F6E'],['Ink','#2B2F3A'],['Sky','#8FB3C7'],['Coral','#DF7C6B']];
 const RATIOS=[['auto','Match first image',null],['4:5',"4:5 portrait",.8],['1:1','1:1 square',1],['a4','A4',.7071],['9:16','9:16 story',.5625],['16:9','16:9 slide',1.7778],['4:3','4:3',1.3333]];
@@ -180,32 +182,40 @@ function bookSheet(book){
 /* ============ book viewer ============ */
 function openBook(id){
   const book=books.find(b=>b.id===id);if(!book)return;
+  renderBookView(book,false);
+}
+function renderBookView(book,readonly){
   app.onclick=null;
   app.innerHTML=`<div class="bookview">
     <header class="bar">
-      <button class="iconbtn" data-a="back" aria-label="Back to shelf">${ICON.back}</button>
+      <button class="iconbtn" data-a="back" aria-label="${readonly?'Go to Date journal':'Back to shelf'}">${ICON.back}</button>
       <div class="bar-title">${h(book.title)}</div>
-      <div class="bar-actions">
+      <div class="bar-actions">${readonly?'':`
         <button class="btn ghost" data-a="add" aria-label="Add pages">${ICON.plus}<span class="lbl">Add pages</span></button>
         <button class="btn ghost" data-a="pages" aria-label="All pages">${ICON.grid}<span class="lbl">Pages</span></button>
-        <button class="iconbtn" data-a="settings" aria-label="Book settings">${ICON.gear}</button>
+        <button class="iconbtn" data-a="share" aria-label="Share this book">${ICON.share}</button>
+        <button class="iconbtn" data-a="settings" aria-label="Book settings">${ICON.gear}</button>`}
       </div>
     </header>
     <main class="stage-wrap"><div class="stage" tabindex="0" aria-label="Book. Swipe, drag, or use arrow keys to turn pages."></div></main>
     <footer class="meta"><div class="meta-text"></div><div class="counter"></div></footer>
+    ${readonly?'<div class="shared-badge">Shared with you — view only · <a href="/">Make your own</a></div>':''}
   </div>`;
-  V={book,p:0,L:1,W:0,raf:0,drag:null,leaves:[],idx:-1,wheelLock:0};
+  V={book,p:0,L:1,W:0,raf:0,drag:null,leaves:[],idx:-1,wheelLock:0,readonly};
   const stage=$('.stage');V.stage=stage;
   buildLeaves();layoutStage();paint(true);
 
   $('.bar').onclick=e=>{
     const t=e.target.closest('button');if(!t)return;
-    if(t.dataset.a==='back'){renderShelf()}
+    if(t.dataset.a==='back'){readonly?(location.href='/'):renderShelf();return}
+    if(readonly)return;
     if(t.dataset.a==='add')addPages();
     if(t.dataset.a==='pages')openOverview();
+    if(t.dataset.a==='share')shareBook(book);
     if(t.dataset.a==='settings')bookSheet(book);
   };
   $('.meta').onclick=e=>{
+    if(readonly)return;
     const t=e.target.closest('button');if(!t)return;
     if(t.dataset.a==='add')addPages();
     if(t.dataset.a==='edit')editDetails(V.idx-1);
@@ -223,7 +233,11 @@ function openBook(id){
     const span=V.W*.85,now=performance.now(),dt=now-d.lt;
     if(dt>0){d.v=.8*d.v+.2*(-(e.clientX-d.lx)/span/dt)}
     d.lx=e.clientX;d.lt=now;
-    V.p=clamp(d.p0-dx/span,0,V.L-1);paint();
+    let np=d.p0-dx/span;
+    // Soft resistance past the front/back cover — a little give instead of
+    // a hard stop, so it doesn't feel like hitting a wall.
+    if(np<0)np*=.35;else if(np>V.L-1)np=(V.L-1)+(np-(V.L-1))*.35;
+    V.p=clamp(np,-.18,V.L-1+.18);paint();
   });
   const end=e=>{
     const d=V.drag;if(!d)return;V.drag=null;
@@ -234,7 +248,7 @@ function openBook(id){
     const base=Math.round(d.p0),moved=V.p-d.p0;
     let t=base;
     if(moved>.22||d.v>.0007)t=base+1;else if(moved<-.22||d.v<-.0007)t=base-1;
-    goTo(t);
+    goTo(t,{velocity:d.v*1000});
   };
   stage.addEventListener('pointerup',end);
   stage.addEventListener('pointercancel',end);
@@ -260,6 +274,9 @@ function layoutStage(){
   const ah=wrap.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom)-6;
   const w=Math.max(80,Math.min(aw,ah*r));
   V.W=w;V.stage.style.width=w+'px';V.stage.style.height=(w/r)+'px';
+  // A closer, width-relative vanishing point makes the turning page visibly
+  // foreshorten and bow instead of just shrinking flat like a sliding card.
+  V.stage.style.setProperty('--persp',Math.round(clamp(w*1.55,780,2000))+'px');
 }
 
 function buildLeaves(){
@@ -296,34 +313,42 @@ function paint(force){
     l.el.style.zIndex=L-i;
     l.el.style.transform=f>0?`rotateY(${-180*f}deg)`:'none';
     l.el.style.opacity=f<.6?1:Math.max(0,1-(f-.6)/.4);
+    l.el.style.setProperty('--f',f);
+    l.el.style.setProperty('--lift',f>0&&f<1?Math.sin(f*Math.PI).toFixed(3):0);
     const back=f>.5;
     l.front.style.display=back?'none':'block';
     l.back.style.display=back?'block':'none';
     const prevF=i>0?clamp(p-(i-1),0,1):0;
-    const under=(prevF>0&&prevF<1)?.34*(1-prevF):0;
-    const own=f>0?Math.sin(Math.min(f,.5)*Math.PI)*.3:0;
+    const under=(prevF>0&&prevF<1)?.42*(1-prevF):0;
+    const own=f>0?Math.sin(Math.min(f,.5)*Math.PI)*.42:0;
     if(l.shade)l.shade.style.opacity=Math.max(under,own);
-    l.bshade.style.opacity=f>.5?(1-f)*.3:0;
+    l.bshade.style.opacity=f>.5?(1-f)*.36:0;
   });
   const idx=Math.round(p);
   if(idx!==V.idx||force){V.idx=idx;updateMeta()}
 }
 function goTo(t,opts={}){
   t=clamp(Math.round(t),0,V.L-1);cancelAnimationFrame(V.raf);
-  const from=V.p,dist=Math.abs(t-from);
-  if(opts.instant||dist<.001){V.p=t;paint();return}
-  const dur=reduceMotion?120:Math.min(700,340+dist*110),t0=performance.now();
+  if(reduceMotion||opts.instant){V.p=t;V.vel=0;paint();return}
+  const target=t;let vel=opts.velocity||0,last=performance.now();
+  // Critically-damped spring: carries the drag's exit velocity straight into
+  // the settle, so a flick keeps its momentum instead of restarting on a
+  // fixed timing curve — the thing that made this read as a slide, not paper.
+  const k=210,c=27.5;
   const step=now=>{
-    const k=clamp((now-t0)/dur,0,1),e=1-Math.pow(1-k,3);
-    V.p=from+(t-from)*e;paint();
-    if(k<1)V.raf=requestAnimationFrame(step);
+    const dt=Math.min(32,now-last)/1000;last=now;
+    const x=V.p-target,accel=(-k*x-c*vel);
+    vel+=accel*dt;V.p+=vel*dt;paint();
+    if(Math.abs(V.p-target)>.0015||Math.abs(vel)>.02){V.raf=requestAnimationFrame(step)}
+    else{V.p=target;V.vel=0;paint()}
   };
   V.raf=requestAnimationFrame(step);
 }
 function updateMeta(){
   const b=V.book,i=V.idx,m=$('.meta-text'),c=$('.counter');if(!m)return;
+  const ro=V.readonly;
   if(b.pages.length===0){
-    m.innerHTML=`<div class="meta-date">This book is empty</div><div class="meta-empty">Upload the pages you made in Canva. They'll be added in file-name order.</div><p style="margin:10px 0 0"><button class="btn primary" data-a="add">${ICON.plus}Add pages</button></p>`;
+    m.innerHTML=`<div class="meta-date">This book is empty</div>${ro?'':`<div class="meta-empty">Upload the pages you made in Canva. They'll be added in file-name order.</div><p style="margin:10px 0 0"><button class="btn primary" data-a="add">${ICON.plus}Add pages</button></p>`}`;
     c.textContent='';return;
   }
   if(i===0){
@@ -331,9 +356,15 @@ function updateMeta(){
     c.textContent='Cover';return;
   }
   const pg=b.pages[i-1];
-  m.innerHTML=(pg.date||pg.note)
-    ?`${pg.date?`<div class="meta-date">${h(fmtDate(pg.date))}</div>`:''}${pg.note?`<div class="meta-note">${h(pg.note)}</div>`:''}<button class="link" data-a="edit">Edit details</button>`
-    :`<div class="meta-empty">No date or note yet.</div><button class="link" data-a="edit">Add date and note</button>`;
+  if(ro){
+    m.innerHTML=(pg.date||pg.note)
+      ?`${pg.date?`<div class="meta-date">${h(fmtDate(pg.date))}</div>`:''}${pg.note?`<div class="meta-note">${h(pg.note)}</div>`:''}`
+      :`<div class="meta-empty">No date or note added.</div>`;
+  }else{
+    m.innerHTML=(pg.date||pg.note)
+      ?`${pg.date?`<div class="meta-date">${h(fmtDate(pg.date))}</div>`:''}${pg.note?`<div class="meta-note">${h(pg.note)}</div>`:''}<button class="link" data-a="edit">Edit details</button>`
+      :`<div class="meta-empty">No date or note yet.</div><button class="link" data-a="edit">Add date and note</button>`;
+  }
   c.textContent=`${i} / ${b.pages.length}`;
 }
 
@@ -376,6 +407,50 @@ function editDetails(pi){
   });
 }
 
+/* ============ share ============ */
+const MAX_SHARE_BYTES=19*1024*1024;
+async function shareBook(book){
+  const s=sheet(`
+    <div class="sheet-head"><h2>Share this book</h2><button class="iconbtn" data-a="close" aria-label="Close">${ICON.x}</button></div>
+    <p class="hint" style="margin-top:0">Anyone with the link can view "${h(book.title)}", page by page, just like you do here. They can't edit it, and it won't update after you keep adding — it's a snapshot as of right now.</p>
+    <div class="sheet-foot"><span class="sp"></span><button class="btn primary" data-a="go">Create link</button></div>`);
+  s.el.addEventListener('click',async e=>{
+    const t=e.target.closest('button');if(!t)return;
+    const a=t.dataset.a;
+    if(a==='close'){s.close();return}
+    if(a==='go'){
+      t.disabled=true;const label=t.textContent;t.textContent='Creating link…';
+      const payload={title:book.title,color:book.color,cover:book.cover,auto:book.auto,ratio:book.ratio,fit:book.fit,
+        pages:book.pages.map(p=>({src:p.src,ratio:p.ratio,date:p.date,note:p.note}))};
+      const bytes=new Blob([JSON.stringify(payload)]).size;
+      if(bytes>MAX_SHARE_BYTES){
+        toast("This book's images are too large to share in one link. Try a book with fewer pages, or smaller Canva exports.");
+        t.disabled=false;t.textContent=label;return;
+      }
+      try{
+        const r=await fetch('/api/share',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        const data=await r.json().catch(()=>({}));
+        if(!r.ok)throw new Error(data.error||"Couldn't create the link. Try again in a moment.");
+        const url=`${location.origin}/view/${data.id}`;
+        s.el.innerHTML=`
+          <div class="sheet-head"><h2>Link ready</h2><button class="iconbtn" data-a="close" aria-label="Close">${ICON.x}</button></div>
+          <div class="field"><label for="share-url">Anyone with this link can view it</label>
+            <input id="share-url" type="text" readonly value="${h(url)}"></div>
+          <div class="sheet-foot"><span class="sp"></span><button class="btn primary" data-a="copy">${ICON.copy}Copy link</button></div>`;
+        const input=$('#share-url',s.el);input.addEventListener('click',()=>input.select());
+      }catch(err){
+        toast(err.message||"Couldn't create the link. Try again in a moment.");
+        t.disabled=false;t.textContent=label;
+      }
+    }
+    if(a==='copy'){
+      const input=$('#share-url',s.el);
+      try{await navigator.clipboard.writeText(input.value);toast('Link copied')}
+      catch(err){input.select();toast('Press ⌘/Ctrl+C to copy')}
+    }
+  });
+}
+
 /* ============ pages overview ============ */
 function openOverview(){
   const b=V.book,s=sheet('','wide');let armed=null;
@@ -408,8 +483,36 @@ function openOverview(){
   });
 }
 
+/* ============ shared (read-only) view ============ */
+async function loadSharedBook(id){
+  app.innerHTML=`<div class="shelf"><header class="shelf-head"><h1>Date journal</h1><p class="sub">Loading the shared book…</p></header></div>`;
+  let res;
+  try{res=await fetch(`/api/share/${encodeURIComponent(id)}`)}
+  catch(e){
+    app.innerHTML=`<div class="shelf"><header class="shelf-head"><h1>Couldn't load this book</h1><p class="sub">Check your connection and try reloading the page.</p></header></div>`;
+    return;
+  }
+  if(res.status===404){
+    app.innerHTML=`<div class="shelf"><header class="shelf-head"><h1>Link not found</h1><p class="sub">This journal link doesn't exist anymore, or was typed wrong.</p></header><p style="margin-top:24px"><a class="link" href="/">Go to Date journal</a></p></div>`;
+    return;
+  }
+  if(!res.ok){
+    const data=await res.json().catch(()=>({}));
+    app.innerHTML=`<div class="shelf"><header class="shelf-head"><h1>Couldn't load this book</h1><p class="sub">${h(data.error||'Something went wrong. Try again in a moment.')}</p></header></div>`;
+    return;
+  }
+  const book=await res.json().catch(()=>null);
+  if(!book||!Array.isArray(book.pages)){
+    app.innerHTML=`<div class="shelf"><header class="shelf-head"><h1>Couldn't load this book</h1><p class="sub">The data for this link looked unexpected.</p></header></div>`;
+    return;
+  }
+  renderBookView(book,true);
+}
+
 /* ============ start ============ */
 (async function init(){
+  const shared=location.pathname.match(/^\/view\/([A-Za-z0-9_-]+)\/?$/);
+  if(shared){await loadSharedBook(shared[1]);return}
   await DB.init();
   books=(await DB.all()).sort((a,b)=>a.created-b.created);
   renderShelf();
